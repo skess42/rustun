@@ -152,7 +152,7 @@ fn main() -> io::Result<()> {
 
         let mut response: JsonKeys = serde_json::from_str(&response).unwrap();
         let JsonKey { key_id, key } = response.keys.pop().unwrap();
-        let qkd_key = key.as_bytes();
+        let qkd_key = base64::decode(key).unwrap();
 
         //use qkd-key for encryption
         let cipher = Aes256Gcm::new(Key::from_slice(&qkd_key[0..32]));
@@ -198,5 +198,6 @@ fn lookup_key(arg: &str, key_id: String) -> io::Result<Vec<u8>> {
     println!("Lookup QKD key response: {}", response);
     let mut answer: JsonKeys = serde_json::from_str(&response).unwrap();
     let JsonKey { key_id: _, key } = answer.keys.pop().unwrap();
-    Ok(key.as_bytes().to_vec())
+    let key = base64::decode(key).unwrap();
+    Ok(key)
 }
