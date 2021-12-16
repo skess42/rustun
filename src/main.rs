@@ -4,10 +4,12 @@ use libc::{ioctl, open, read, write};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::ffi::CString;
+use std::fs::{File, OpenOptions};
+use std::io::Write;
 use std::net::{SocketAddr, UdpSocket};
 use std::os::raw::{c_char, c_short};
 use std::sync::{Arc, Mutex};
-use std::{env, io, mem, thread};
+use std::{env, io, mem, thread, time::Instant};
 const TUNSETIFF: u64 = 0x400454ca;
 const SIOCGIFFLAGS: u64 = 0x8913;
 const SIOCSIFFLAGS: u64 = 0x8914;
@@ -69,6 +71,25 @@ fn main() -> io::Result<()> {
     } else {
         Arc::new(Mutex::new(Some(arg.parse().expect("Invalid IP:port")))) //client parses IP:port
     };
+
+    let mut new_key_measurement = OpenOptions::new()
+        .write(true)
+        .append(true)
+        .open("new-key-measurement")
+        .unwrap();
+
+    let mut aes_measurement = OpenOptions::new()
+        .write(true)
+        .append(true)
+        .open("aes-measurement")
+        .unwrap();
+
+    let mut key_lookup_measurement = OpenOptions::new()
+        .write(true)
+        .append(true)
+        .open("key-lookup-measurement")
+        .unwrap();
+
     let fd = unsafe { open(CString::new("/dev/net/tun").unwrap().as_ptr(), 2) };
     let mut params = SetIff {
         ifname: [
@@ -111,7 +132,7 @@ fn main() -> io::Result<()> {
             // println!("Recieved encrypted packet: {:x?}", message.ciphertext);
 
             //use matching qkd-key for decryption
-            let key = lookup_key(&arg_cpy, message.key_id).unwrap();
+            let key = lookup_key(&arg_cpy, message.key_id, &mut key_lookup_measurement).unwrap();
             let key = Key::from_slice(&key[0..32]);
             let cipher = Aes256Gcm::new(key);
 
@@ -147,7 +168,12 @@ fn main() -> io::Result<()> {
             .danger_accept_invalid_certs(true)
             .build()
             .unwrap();
+        let get_new_key = Instant::now();
         let response = client.get(&url).send().unwrap().text().unwrap();
+        let duration = get_new_key.elapsed();
+        if arg != "-s" {
+            writeln!(new_key_measurement, "{:.3?}", duration)?;
+        }
         // println!("Get QKD key: {}", response);
 
         let mut response: JsonKeys = serde_json::from_str(&response).unwrap();
@@ -157,9 +183,14 @@ fn main() -> io::Result<()> {
         //use qkd-key for encryption
         let cipher = Aes256Gcm::new(Key::from_slice(&qkd_key[0..32]));
         let nonce = rand::thread_rng().gen::<[u8; 12]>(); // unique nonce per message
+        let aes_encryption = Instant::now();
         let ciphertext = cipher
             .encrypt(Nonce::from_slice(&nonce), message.as_ref())
             .unwrap();
+        let duration = aes_encryption.elapsed();
+        if arg != "-s" {
+            writeln!(aes_measurement, "{:.3?}", duration)?;
+        }
         // println!("Encrypted packet: {:x?}", &ciphertext);
 
         let encrypted_message = Message {
@@ -179,7 +210,7 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
-fn lookup_key(arg: &str, key_id: String) -> io::Result<Vec<u8>> {
+fn lookup_key(arg: &str, key_id: String, key_lookup_measurement: &mut File) -> io::Result<Vec<u8>> {
     let client = if arg == "-s" { "ETSIA" } else { "ETSIB" };
     let url = format!("https://127.0.0.1:5000/api/v1/keys/{}/dec_keys", client);
     let body = format!(r#"{{"key_IDs":[{{"key_ID":"{}"}}]}}"#, key_id);
@@ -187,6 +218,8 @@ fn lookup_key(arg: &str, key_id: String) -> io::Result<Vec<u8>> {
         .danger_accept_invalid_certs(true)
         .build()
         .unwrap();
+
+    let lookup_key = Instant::now();
     let response = client
         .post(&url)
         .header("Content-Type", "application/json")
@@ -195,6 +228,10 @@ fn lookup_key(arg: &str, key_id: String) -> io::Result<Vec<u8>> {
         .unwrap()
         .text()
         .unwrap();
+    let duration = lookup_key.elapsed();
+    if arg != "-s" {
+        writeln!(key_lookup_measurement, "{:.3?}", duration)?;
+    }
     // println!("Lookup QKD key response: {}", response);
     let mut answer: JsonKeys = serde_json::from_str(&response).unwrap();
     let JsonKey { key_id: _, key } = answer.keys.pop().unwrap();
