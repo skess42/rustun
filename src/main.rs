@@ -108,7 +108,7 @@ fn main() -> io::Result<()> {
             let _ = addr_ref.lock().and_then(|mut a| Ok(a.replace(src_addr))); //save addr
 
             let message: Message = bincode::deserialize(&buf[..rcvd]).unwrap();
-            println!("Recieved encrypted packet: {:x?}", message.ciphertext);
+            // println!("Recieved encrypted packet: {:x?}", message.ciphertext);
 
             //use matching qkd-key for decryption
             let key = lookup_key(&arg_cpy, message.key_id).unwrap();
@@ -117,7 +117,7 @@ fn main() -> io::Result<()> {
 
             let nonce = Nonce::from_slice(&message.nonce);
             let plaintext = cipher.decrypt(nonce, message.ciphertext.as_ref()).unwrap();
-            println!("Send plaintext packet on tun1: {:?}", &plaintext);
+            // println!("Send plaintext packet on tun1: {:?}", &plaintext);
 
             let plaintext_len = plaintext.len();
             let origptr: *const u8 = &plaintext[0]; //we'll need transmute to convert *const u8 to void*
@@ -138,7 +138,7 @@ fn main() -> io::Result<()> {
         }
 
         let message = &buf[..read_res as usize];
-        println!("Recieved packet on tun1: {:?}", message);
+        // println!("Recieved packet on tun1: {:?}", message);
 
         // recieve new key from qkd-device
         let client = if arg == "-s" { "ETSIA" } else { "ETSIB" };
@@ -148,7 +148,7 @@ fn main() -> io::Result<()> {
             .build()
             .unwrap();
         let response = client.get(&url).send().unwrap().text().unwrap();
-        println!("Get QKD key: {}", response);
+        // println!("Get QKD key: {}", response);
 
         let mut response: JsonKeys = serde_json::from_str(&response).unwrap();
         let JsonKey { key_id, key } = response.keys.pop().unwrap();
@@ -160,7 +160,7 @@ fn main() -> io::Result<()> {
         let ciphertext = cipher
             .encrypt(Nonce::from_slice(&nonce), message.as_ref())
             .unwrap();
-        println!("Encrypted packet: {:x?}", &ciphertext);
+        // println!("Encrypted packet: {:x?}", &ciphertext);
 
         let encrypted_message = Message {
             nonce,
@@ -195,7 +195,7 @@ fn lookup_key(arg: &str, key_id: String) -> io::Result<Vec<u8>> {
         .unwrap()
         .text()
         .unwrap();
-    println!("Lookup QKD key response: {}", response);
+    // println!("Lookup QKD key response: {}", response);
     let mut answer: JsonKeys = serde_json::from_str(&response).unwrap();
     let JsonKey { key_id: _, key } = answer.keys.pop().unwrap();
     let key = base64::decode(key).unwrap();
